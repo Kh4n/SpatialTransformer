@@ -80,28 +80,7 @@ class SpatialTransformer(tf.keras.layers.Wrapper):
     @classmethod
     def from_config(cls, config):
         return cls(**config)
-
-# x = tf.constant([
-#         [
-#             [[0],[1]],
-#             [[1],[2]]
-#         ],
-#         [
-#             [[2],[3]],
-#             [[3],[4]]
-#         ]
-#     ])
-# batches = 2
-# x0 = [[0, 1, 1, 0], [1, 1, 0, 1]]
-# y0 = [[0, 0, 1, 1], [0, 0, 1, 0]]
-# indices = tf.tile(tf.range(batches), [2**2])
-# indices = tf.transpose(tf.reshape(indices, [2**2, batches]))
-# indices = tf.reshape(indices, [2**2*batches])
-# indices = tf.stack([indices, tf.reshape(x0, [batches*2*2]), tf.reshape(y0, [batches*2*2])], axis=1)
-# print(tf.stack([x0,y0], axis=2))
-# print(tf.gather_nd(x, tf.stack([x0,y0], axis=2)))
-# exit()
-
+    
 
 model = tf.keras.models.Sequential()
 
@@ -122,62 +101,8 @@ model.compile(
     loss="mse",
 )
 
-x = np.array([[1.0,0.0], [1.0,1.0]])
 x = np.array([cv.imread("square.jpg").astype(np.float32), cv.imread("square.jpg").astype(np.float32)])
 y = np.array([[1.0], [0.0]])
 
 print(model.summary())
 model.fit(x, y, batch_size=2, epochs=10, callbacks=[tf.keras.callbacks.TensorBoard(log_dir='.\\logs')])
-
-'''
-img = cv.imread("random.jpg")
-h, w, c = img.shape
-print(h, w, c)
-
-x = np.linspace(-1, 1, w)
-y = np.linspace(-1, 1, h)
-# x, y = np.arange(w), np.arange(h)
-x_t, y_t = np.meshgrid(x, y)
-
-M = np.array([[0.707, -0.707, 0.], [0.707, 0.707, 0.]])
-
-sampling_grid = np.vstack([x_t.flatten(), y_t.flatten(), np.ones(h*w)])
-num_batches = 4
-sampling_grid = np.resize(sampling_grid, (num_batches, 3, h*w))
-sampling_grid = np.matmul(M, sampling_grid)
-
-x = ((sampling_grid[:, 0] + 1) * w) * 0.5
-y = ((sampling_grid[:, 1] + 1) * h) * 0.5
-
-x0 = np.floor(x).astype(np.int64)
-x1 = x0 + 1
-y0 = np.floor(y).astype(np.int64)
-y1 = y0 + 1
-
-x0 = np.clip(x0, 0, w-1)
-x1 = np.clip(x1, 0, w-1)
-y0 = np.clip(y0, 0, h-1)
-y1 = np.clip(y1, 0, h-1)
-
-Ia = img[y0, x0]
-Ib = img[y1, x0]
-Ic = img[y0, x1]
-Id = img[y1, x1]
-
-wa = (x1-x) * (y1-y)
-wb = (x1-x) * (y-y0)
-wc = (x-x0) * (y1-y)
-wd = (x-x0) * (y-y0)
-
-wa = np.expand_dims(wa, axis=1)
-wb = np.expand_dims(wb, axis=1)
-wc = np.expand_dims(wc, axis=1)
-wd = np.expand_dims(wd, axis=1)
-
-out = wa*Ia + wb*Ib + wc*Ic + wd*Id
-out = np.reshape(out, (num_batches, h, w, c)).astype(np.uint8)
-cv.imshow("dd", img)
-cv.imshow("hi", out[3])
-cv.waitKey(0)
-cv.destroyAllWindows()
-'''
