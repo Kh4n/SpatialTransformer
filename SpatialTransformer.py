@@ -1,4 +1,5 @@
 import tensorflow as tf
+import cv2 as cv
 
 class SpatialTransformer(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
@@ -15,12 +16,13 @@ class SpatialTransformer(tf.keras.layers.Layer):
   
     def call(self, inputs):
         local = inputs[0]
-        image = inputs[1]
-        batches = tf.shape(image)[0]
-        sampling_grid_curr = tf.matmul(tf.reshape(local, [batches, 2, 3]), self.sampling_grid)
+        imgs = inputs[1]
 
-        x = ((sampling_grid_curr[:, 0] + 1) * self.w) * 0.5
-        y = ((sampling_grid_curr[:, 1] + 1) * self.h) * 0.5
+        transforms = tf.reshape(local, [-1, 2, 3])
+        samples = tf.matmul(transforms, self.sampling_grid)
+
+        x = ((samples[:, 0] + 1) * self.w) * 0.5
+        y = ((samples[:, 1] + 1) * self.h) * 0.5
 
         x0 = tf.floor(x)
         x1 = x0 + 1
@@ -32,39 +34,23 @@ class SpatialTransformer(tf.keras.layers.Layer):
         y0 = tf.clip_by_value(y0, 0, self.h-1)
         y1 = tf.clip_by_value(y1, 0, self.h-1)
 
-        wa = (x1-x) * (y1-y)
-        wb = (x1-x) * (y-y0)
-        wc = (x-x0) * (y1-y)
-        wd = (x-x0) * (y-y0)
-
-        wa = tf.expand_dims(wa, axis=2)
-        wb = tf.expand_dims(wb, axis=2)
-        wc = tf.expand_dims(wc, axis=2)
-        wd = tf.expand_dims(wd, axis=2)
+        wa = tf.expand_dims((y1-y) * (x1-x), axis=-1)
+        wb = tf.expand_dims((y1-y) * (x-x0), axis=-1)
+        wc = tf.expand_dims((y-y0) * (x1-x), axis=-1)
+        wd = tf.expand_dims((y-y0) * (x-x0), axis=-1)
 
         x0 = tf.cast(x0, tf.int32)
         x1 = tf.cast(x1, tf.int32)
         y0 = tf.cast(y0, tf.int32)
         y1 = tf.cast(y1, tf.int32)
 
-        batch_indices = tf.tile(tf.range(batches), [self.h*self.w])
-        batch_indices = tf.transpose(tf.reshape(batch_indices, [self.h*self.w, batches]))
-        batch_indices = tf.reshape(batch_indices, [self.h*self.w*batches])
+        y0_x0 = tf.stack([y0, x0], axis=-1)
+        Ia = tf.gather_nd(imgs, tf.stack([y0, x0], axis=-1), batch_dims=1)
+        Ib = tf.gather_nd(imgs, tf.stack([y0, x1], axis=-1), batch_dims=1)
+        Ic = tf.gather_nd(imgs, tf.stack([y1, x0], axis=-1), batch_dims=1)
+        Id = tf.gather_nd(imgs, tf.stack([y1, x1], axis=-1), batch_dims=1)
 
-        indices = tf.stack([batch_indices, tf.reshape(y0, [batches*self.w*self.h]), tf.reshape(x0, [batches*self.w*self.h])], axis=1)
-        Ia = tf.reshape(tf.gather_nd(image, indices), [batches, self.h*self.w, self.c])
-
-        indices = tf.stack([batch_indices, tf.reshape(y1, [batches*self.w*self.h]), tf.reshape(x0, [batches*self.w*self.h])], axis=1)
-        Ib = tf.reshape(tf.gather_nd(image, indices), [batches, self.h*self.w, self.c])
-
-        indices = tf.stack([batch_indices, tf.reshape(y0, [batches*self.w*self.h]), tf.reshape(x1, [batches*self.w*self.h])], axis=1)
-        Ic = tf.reshape(tf.gather_nd(image, indices), [batches, self.h*self.w, self.c])
-
-        indices = tf.stack([batch_indices, tf.reshape(y1, [batches*self.w*self.h]), tf.reshape(x1, [batches*self.w*self.h])], axis=1)
-        Id = tf.reshape(tf.gather_nd(image, indices), [batches, self.h*self.w, self.c])
-
-        out = wa*Ia + wb*Ib + wc*Ic + wd*Id
-        out = tf.reshape(out, [batches, self.h, self.w, self.c])
+        out = tf.reshape(wa*Ia + wb*Ib + wc*Ic + wd*Id, [-1, self.h, self.w, self.c])
         return out
   
     def compute_output_shape(self, input_shape):
@@ -77,3 +63,19 @@ class SpatialTransformer(tf.keras.layers.Layer):
     @classmethod
     def from_config(cls, config):
         return cls(**config)
+
+if __name__ == "__main__":
+    import numpy as np
+    import math
+
+    batches = 2
+    transforms = np.asarray(
+        [[math.cos(math.pi/6), -math.sin(math.pi/6), 0.,
+          math.sin(math.pi/6),  math.cos(math.pi/6), 0.]]*batches,
+        dtype=np.float32
+    )
+    imgs = np.asarray([cv.imread("random.jpg"), cv.imread("random.jpg")]).astype(np.float32)
+    out = SpatialTransformer()([transforms, imgs])
+    print(np.shape(out))
+    cv.imshow("out", np.float32(out[0]) / 255)
+    cv.waitKey()
