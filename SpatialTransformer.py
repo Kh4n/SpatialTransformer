@@ -94,7 +94,9 @@ if __name__ == "__main__":
     #     dtype=np.float32
     # )
     imgs = np.asarray([cv.imread("random.jpg"), cv.imread("random.jpg")]).astype(np.float32)
-    imgs = np.asarray([cv.imread("square.jpg"), cv.imread("square.jpg")]).astype(np.float32)
+
+    # different image (width == height)
+    # imgs = np.asarray([cv.imread("square.jpg"), cv.imread("square.jpg")]).astype(np.float32)
     out = SpatialTransformer()([transforms, imgs])
     print(np.shape(out))
     cv.imshow("the image should be rotated 30deg ccw", np.float32(out[0]) / 255)
