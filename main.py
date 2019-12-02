@@ -24,15 +24,6 @@ def identity_flat(shape, dtype=None):
         np.float32
     )
 
-def identity_flat_sigmoid(shape, dtype=None):
-    mf = np.finfo(np.float32).max
-    nf = np.finfo(np.float32).min
-    return tf.convert_to_tensor(
-        [mf,nf,nf,
-         nf,mf,nf],
-        np.float32
-    )
-
 img_dims = (240,240,3)
 
 imgs_in = layers.Input(shape=img_dims)

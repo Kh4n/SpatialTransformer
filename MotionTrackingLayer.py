@@ -1,9 +1,9 @@
 import tensorflow as tf
 import cv2 as cv
 
-class SpatialTransformer(tf.keras.layers.Layer):
+class MotionTrackingLayer(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
-        super(SpatialTransformer, self).__init__(**kwargs)
+        super(MotionTrackingLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
         # grab the dimensions of the image here so we can use them later. also will throw errors early for users
@@ -11,31 +11,35 @@ class SpatialTransformer(tf.keras.layers.Layer):
         self.w = input_shape[1][2]
         self.c = input_shape[1][3]
 
-        # need to get the axis that has the max length so we can scale relatively to that
+        # get smallest axis to scale relatively to that
         self.max_hw = max(self.h, self.w)
+        self.min_hw = min(self.h, self.w)
+        self.ratio = self.max_hw/self.min_hw
 
-        # this where many other implementations do not work correctly. you must create the meshgrid with sizes relative to the max dimension.
-        # this is what it used to look like for reference: x_t, y_t = tf.meshgrid(tf.linspace(-1.0, 1.0, self.w), tf.linspace(-1.0, 1.0, self.h))
-        # essentially, one dimension gets skewed because it has less samples (last arg of tf.linspace) but is still scaled to [-1,1]
-        x_t, y_t = tf.meshgrid(
-            tf.linspace(-self.w/self.max_hw, self.w/self.max_hw, self.w),
-            tf.linspace(-self.h/self.max_hw, self.h/self.max_hw, self.h)
-        )
-        self.sampling_grid = tf.stack([tf.reshape(x_t, [self.h*self.w]), tf.reshape(y_t, [self.h*self.w]), tf.ones(self.h*self.w, tf.float32)])
+        # we scale to the smaller axis and then apply transforms to that resulting square
+        # originally was [0.0, 1.0], but this resulted in the model being unable to learn. not sure why
+        x_t, y_t = tf.meshgrid(tf.linspace(-1.0, 1.0, self.min_hw), tf.linspace(-1.0, 1.0, self.min_hw))
+        # x_t, y_t = tf.meshgrid(tf.linspace(0.0, 1.0, self.min_hw), tf.linspace(0.0, 1.0, self.min_hw))
+        self.sampling_grid = tf.stack([
+            tf.reshape(x_t, [self.min_hw*self.min_hw]), tf.reshape(y_t, [self.min_hw*self.min_hw])
+        ])
 
-        super(SpatialTransformer, self).build(input_shape)
+        super(MotionTrackingLayer, self).build(input_shape)
   
     def call(self, inputs):
-        local = inputs[0]
+        transforms = inputs[0]
         imgs = inputs[1]
 
         # -1 as reshape automatically infers batch dimension
-        transforms = tf.reshape(local, [-1, 2, 3])
-        samples = tf.matmul(transforms, self.sampling_grid)
+        scale = tf.reshape(transforms[:, -1] + 1, [-1, 1, 1])
+        translate = tf.reshape(transforms[:, 0:2], [-1, 2, 1])
+        samples = (tf.expand_dims(self.sampling_grid, axis=0) * scale) + translate
 
         # have to adjust to the relative scaling done earlier
-        x = ((samples[:, 0] + self.w/self.max_hw) * self.max_hw) * 0.5
-        y = ((samples[:, 1] + self.h/self.max_hw) * self.max_hw) * 0.5
+        # x = samples[:, 0] * self.min_hw
+        x = ((samples[:, 0] + 1) * self.min_hw) * 0.5
+        # y = samples[:, 1] * self.min_hw
+        y = ((samples[:, 1] + 1) * self.min_hw) * 0.5
 
         x0 = tf.floor(x)
         x1 = x0 + 1
@@ -62,14 +66,14 @@ class SpatialTransformer(tf.keras.layers.Layer):
         Ic = tf.gather_nd(imgs, tf.stack([y1, x0], axis=-1), batch_dims=1)
         Id = tf.gather_nd(imgs, tf.stack([y1, x1], axis=-1), batch_dims=1)
 
-        out = tf.reshape(wa*Ia + wb*Ib + wc*Ic + wd*Id, [-1, self.h, self.w, self.c])
+        out = tf.reshape(wa*Ia + wb*Ib + wc*Ic + wd*Id, [-1, self.min_hw, self.min_hw, self.c])
         return out
   
     def compute_output_shape(self, input_shape):
-        return input_shape[1]
+        return [None, self.min_hw, self.min_hw, self.c]
   
     def get_config(self):
-        base_config = super(SpatialTransformer, self).get_config()
+        base_config = super(MotionTrackingLayer, self).get_config()
         return base_config
   
     @classmethod
@@ -81,23 +85,16 @@ if __name__ == "__main__":
     import math
 
     batches = 4
+    # identity transform, for testing purposes
     transforms = np.asarray(
-        [[math.cos(math.pi/6), -math.sin(math.pi/6), 0.,
-          math.sin(math.pi/6),  math.cos(math.pi/6), 0.]]*batches,
+        [[0.0, 0.0, 0.0]]*batches,
         dtype=np.float32
     )
-
-    # identity transform, for testing purposes
-    # transforms = np.asarray(
-    #     [[1., 0., 0.,
-    #       0., 1., 0.]]*batches,
-    #     dtype=np.float32
-    # )
-    imgs = np.asarray([cv.imread("random.jpg"), cv.imread("random.jpg")]).astype(np.float32)
+    imgs = np.asarray([cv.imread("random.jpg")]*batches).astype(np.float32)
 
     # different image (width == height)
     # imgs = np.asarray([cv.imread("square.jpg"), cv.imread("square.jpg")]).astype(np.float32)
-    out = SpatialTransformer()([transforms, imgs])
+    out = MotionTrackingLayer()([transforms, imgs])
     print(np.shape(out))
-    cv.imshow("the image should be rotated 30deg ccw", np.float32(out[0]) / 255)
+    cv.imshow("the image should look almost the same, just cropped from the right", np.float32(out[0]) / 255)
     cv.waitKey()
