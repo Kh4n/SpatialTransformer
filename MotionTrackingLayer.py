@@ -1,9 +1,9 @@
 import tensorflow as tf
 import cv2 as cv
 
-class MotionTrackingLayer(tf.keras.layers.Layer):
+class LocScaleTransform(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
-        super(MotionTrackingLayer, self).__init__(**kwargs)
+        super(LocScaleTransform, self).__init__(**kwargs)
 
     def build(self, input_shape):
         # grab the dimensions of the image here so we can use them later. also will throw errors early for users
@@ -24,7 +24,7 @@ class MotionTrackingLayer(tf.keras.layers.Layer):
             tf.reshape(x_t, [self.min_hw*self.min_hw]), tf.reshape(y_t, [self.min_hw*self.min_hw])
         ])
 
-        super(MotionTrackingLayer, self).build(input_shape)
+        super(LocScaleTransform, self).build(input_shape)
   
     def call(self, inputs):
         transforms = inputs[0]
@@ -73,12 +73,38 @@ class MotionTrackingLayer(tf.keras.layers.Layer):
         return [None, self.min_hw, self.min_hw, self.c]
   
     def get_config(self):
-        base_config = super(MotionTrackingLayer, self).get_config()
+        base_config = super(LocScaleTransform, self).get_config()
         return base_config
   
     @classmethod
     def from_config(cls, config):
         return cls(**config)
+
+
+class ZoomOutMT(tf.keras.layers.Layer):
+    def __init__(self, zoom_amount=2, **kwargs):
+        self.zoom_amount = zoom_amount
+        super(ZoomOutMT, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.zoom_tensor = tf.convert_to_tensor([[1, 1, self.zoom_amount]], tf.float32)
+        super(ZoomOutMT, self).build(input_shape)
+  
+    def call(self, inputs):
+        return inputs*self.zoom_tensor
+  
+    def compute_output_shape(self, input_shape):
+        return input_shape
+  
+    def get_config(self):
+        base_config = super(ZoomOutMT, self).get_config()
+        return base_config
+  
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
+
 
 if __name__ == "__main__":
     import numpy as np
@@ -94,7 +120,7 @@ if __name__ == "__main__":
 
     # different image (width == height)
     # imgs = np.asarray([cv.imread("square.jpg"), cv.imread("square.jpg")]).astype(np.float32)
-    out = MotionTrackingLayer()([transforms, imgs])
+    out = LocScaleTransform()([transforms, imgs])
     print(np.shape(out))
     cv.imshow("the image should look almost the same, just cropped from the right", np.float32(out[0]) / 255)
     cv.waitKey()

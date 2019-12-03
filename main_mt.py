@@ -1,7 +1,7 @@
 import tensorflow as tf
 import cv2 as cv
 import numpy as np
-import MotionTrackingLayer as mt
+import LocScaleTransform as mt
 import ImageOutputAtLayerTensorboard as it
 import shutil
 import os
@@ -40,7 +40,7 @@ flat = layers.Activation("tanh")(flat)
 dense = layers.Dense(32, activation="tanh")(flat)
 local = layers.Dense(3, kernel_initializer="zeros")(dense)
 # local = layers.Activation("sigmoid")(local)
-mt = mt.MotionTrackingLayer(name="mt")([local, imgs_in])
+mt = mt.LocScaleTransform(name="mt")([local, imgs_in])
 # out = layers.UpSampling2D(size=(8, 8), interpolation='bilinear')(st)
 
 model = tf.keras.Model(inputs=[imgs_in], outputs=[mt])
