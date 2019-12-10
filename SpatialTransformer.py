@@ -61,6 +61,11 @@ class SpatialTransformer(tf.keras.layers.Layer):
         Ib = tf.gather_nd(imgs, tf.stack([y0, x1], axis=-1), batch_dims=1)
         Ic = tf.gather_nd(imgs, tf.stack([y1, x0], axis=-1), batch_dims=1)
         Id = tf.gather_nd(imgs, tf.stack([y1, x1], axis=-1), batch_dims=1)
+        a = tf.stack([y0, x0], axis=-1)
+        print(tf.shape(y0))
+        print(tf.shape(a))
+        print(tf.shape(wa))
+        print(tf.shape(Ia))
 
         out = tf.reshape(wa*Ia + wb*Ib + wc*Ic + wd*Id, [-1, self.h, self.w, self.c])
         return out
@@ -93,7 +98,7 @@ if __name__ == "__main__":
     #       0., 1., 0.]]*batches,
     #     dtype=np.float32
     # )
-    imgs = np.asarray([cv.imread("random.jpg"), cv.imread("random.jpg")]).astype(np.float32)
+    imgs = np.asarray([cv.imread("random.jpg")]*batches).astype(np.float32)
 
     # different image (width == height)
     # imgs = np.asarray([cv.imread("square.jpg"), cv.imread("square.jpg")]).astype(np.float32)

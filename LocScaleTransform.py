@@ -113,7 +113,7 @@ if __name__ == "__main__":
     batches = 4
     # identity transform, for testing purposes
     transforms = np.asarray(
-        [[0.0, 0.0, 0.0]]*batches,
+        [[4.0, 4.0, 0.0]]*batches,
         dtype=np.float32
     )
     imgs = np.asarray([cv.imread("random.jpg")]*batches).astype(np.float32)
