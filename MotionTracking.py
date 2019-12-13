@@ -1,5 +1,6 @@
 import tensorflow as tf
 import cv2 as cv
+import numpy as np
 
 def gaussian(x, sigma):
     return 1/(sigma*math.sqrt(2*math.pi))*math.e**(-1/2*(x/sigma)**2)
@@ -66,7 +67,7 @@ class MotionTracking(tf.keras.layers.Layer):
             [3, 3, 1, 1]
         )
 
-        weights = np.ones([window_pixel_wh, window_pixel_wh])
+        weights = np.ones([self.win_pixel_wh, self.win_pixel_wh])
         # weights = np.empty([window_pixel_wh, window_pixel_wh])
         # center = window_pixel_wh//2
         # for y in range(window_pixel_wh):
@@ -74,7 +75,7 @@ class MotionTracking(tf.keras.layers.Layer):
         #         weights[y, x] = (x-center)**2 + (y-center)**2
 
         # weights = gaussian(np.sqrt(weights), self.sigma)
-        self.win_weights = tf.constant(weights, shape=[1, 1, window_pixel_wh, window_pixel_wh, 1], dtype=tf.float32)
+        self.win_weights = tf.constant(weights, shape=[1, 1, self.win_pixel_wh, self.win_pixel_wh, 1], dtype=tf.float32)
         # print(weights)
         # tf.print(weights)
         # tf.print(tf.reduce_max(weights))
@@ -214,11 +215,16 @@ class MotionTracking(tf.keras.layers.Layer):
             i += 1
             return i, samples, imgs, tot_VxVy
         
-        _, samples, _, tot_VxVy = tf.while_loop(cond, iterate, [i, samples, imgs, tot_VxVy])
+        _, samples, _, tot_VxVy = tf.while_loop(
+            cond, iterate, [i, samples, imgs, tot_VxVy],
+            shape_invariants=[i.get_shape(), samples.get_shape(), imgs.get_shape(), tf.TensorShape([None, self.num_tracks, None, 1])]
+        )
         tracked = self.sample_ntracks_from_2frames(samples, imgs[:, seq_len-2:seq_len])[:, 1]
         tot_VxVy = tf.reshape(tot_VxVy, [-1, self.num_tracks, seq_len, 2])
+        tot_VxVy.set_shape([None, self.num_tracks, 5, 2])
         # tf.print(tot_VxVy)
         # return tf.stack([first_frame, tracked], axis=1)
+        tf.print(tot_VxVy.get_shape())
         return tot_VxVy
   
     def compute_output_shape(self, input_shape):
