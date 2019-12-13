@@ -5,7 +5,7 @@ def gaussian(x, sigma):
     return 1/(sigma*math.sqrt(2*math.pi))*math.e**(-1/2*(x/sigma)**2)
 
 class MotionTracking(tf.keras.layers.Layer):
-    def __init__(self, num_tracks=3, window_pixel_wh=21, sigma=0.3, **kwargs):
+    def __init__(self, num_tracks, window_pixel_wh=21, sigma=0.3, **kwargs):
         self.sigma = sigma
         assert(num_tracks > 1)
         assert(window_pixel_wh >= 3)
@@ -110,7 +110,7 @@ class MotionTracking(tf.keras.layers.Layer):
 
         # we are sampling the image num_tracks times, so we need to tile here. unlike other
         # operations, there is no way for gather_nd to broadcast, so we need to tile explicitly
-        tiled_imgs = tf.tile(tf.expand_dims(imgs, axis=2), [1, 1, self.num_tracks, 1, 1, 1])
+        tiled_imgs = tf.tile(tf.expand_dims(frames, axis=2), [1, 1, self.num_tracks, 1, 1, 1])
 
         # there are not actually 3 batch dimensions. however this works as intended: performing the
         # indexing for each batch and motion track
@@ -145,7 +145,7 @@ class MotionTracking(tf.keras.layers.Layer):
 
         sum_IxIy = tf.reduce_sum(Ix*Iy*self.win_weights, axis=[2,3,4])
         ATA = tf.reshape(tf.stack([sum_Iy2, -sum_IxIy, -sum_IxIy, sum_Ix2], axis=-1), [-1, self.num_tracks, 2,2])
-        ATA_det = tf.reshape(1.0/(sum_Ix2*sum_Iy2 - sum_IxIy*sum_IxIy) , [-1, self.num_tracks, 1,1])
+        ATA_det = tf.reshape(1.0/(sum_Ix2*sum_Iy2 - sum_IxIy*sum_IxIy + 1e-07) , [-1, self.num_tracks, 1,1])
         ATA_1 = ATA_det*ATA
 
         It = second_frame-first_frame
@@ -174,42 +174,56 @@ class MotionTracking(tf.keras.layers.Layer):
 
     def iterative_LK(self, samples, frames, iterations):
         out = self.sample_ntracks_from_2frames(samples, frames)
-        second_frame = out[:, 1]
+        first_frame = out[:, 0]
+        factor = 1.5
 
-        VxVy = self.calc_velocity_2frames_ntracks_LK(out[:, 0], second_frame)
+        VxVy = self.calc_velocity_2frames_ntracks_LK(first_frame, out[:, 1])*factor
         samples -= VxVy
         sum_VxVy = VxVy
 
         i = tf.constant(1)
-        check = lambda i, s, f, sf, svv: tf.less(i, iterations)
+        cond = lambda i, s, f, sf, svv: tf.less(i, iterations)
 
-        def iterate(i, samples, frames, second_frame, sum_VxVy):
+        def iterate(i, samples, frames, first_frame, sum_VxVy):
             out = self.sample_ntracks_from_2frames(samples, frames)
-            VxVy = self.calc_velocity_2frames_ntracks_LK(out[:, 0], second_frame)
-            samples -= VxVy
+            VxVy = self.calc_velocity_2frames_ntracks_LK(first_frame, out[:, 1])*factor
+            samples += VxVy
             i += 1
             sum_VxVy += VxVy
-            return i, samples, frames, second_frame, sum_VxVy
+            return i, samples, frames, first_frame, sum_VxVy
 
-        _, samples, _, _, sum_VxVy = tf.while_loop(check, iterate, [i, samples, frames, second_frame, sum_VxVy])
-        out = self.sample_ntracks_from_2frames(samples, frames)
-        tf.print(sum_VxVy)
-        return out[:, 0], second_frame
+        _, samples, _, _, sum_VxVy = tf.while_loop(cond, iterate, [i, samples, frames, first_frame, sum_VxVy])
+        return samples, sum_VxVy
 
 
     def call(self, inputs):
         init_track_locs = tf.reshape(inputs[0], [-1, self.num_tracks, 2, 1]) * 1.0/self.scale
         imgs = inputs[1]
+        seq_len = tf.shape(imgs)[1]
 
         samples = tf.reshape(self.sampling_grid, [1, 1, 2, -1]) + init_track_locs
-        tmp = self.sample_ntracks_from_2frames(samples, imgs[:, 0:2])
+        first_frame = self.sample_ntracks_from_2frames(samples, imgs[:, 0:2])[:, 0]
+        samples, tot_VxVy = self.iterative_LK(samples, imgs[:, 0:2], 50)
+        tot_VxVy = tf.concat([tf.reshape(inputs[0], [-1, self.num_tracks, 2, 1]), tot_VxVy], axis=2)
 
-        out, sf = self.iterative_LK(samples, imgs[:, 0:2], 20)
+        i = tf.constant(1)
+        cond = lambda i, s, imgs, tot_VxVy: tf.less(i, seq_len-1)
+        def iterate(i, samples, imgs, tot_VxVy):
+            samples, sum_VxVy = self.iterative_LK(samples, imgs[:, i:i+2], 50)
+            tot_VxVy = tf.concat([tot_VxVy, sum_VxVy], axis=2)
+            i += 1
+            return i, samples, imgs, tot_VxVy
         
-        return tf.stack([out, sf], axis=1)
+        _, samples, _, tot_VxVy = tf.while_loop(cond, iterate, [i, samples, imgs, tot_VxVy])
+        tracked = self.sample_ntracks_from_2frames(samples, imgs[:, seq_len-2:seq_len])[:, 1]
+        tot_VxVy = tf.reshape(tot_VxVy, [-1, self.num_tracks, seq_len, 2])
+        # tf.print(tot_VxVy)
+        # return tf.stack([first_frame, tracked], axis=1)
+        return tot_VxVy
   
     def compute_output_shape(self, input_shape):
-        return [None, self.win_pixel_wh, self.win_pixel_wh, self.c]
+        seq_len = input_shape[1][1]
+        return [None, self.num_tracks, seq_len, 2]
   
     def get_config(self):
         base_config = super(MotionTracking, self).get_config()
@@ -226,18 +240,21 @@ if __name__ == "__main__":
     window_pixel_wh = 21
     num_tracks = 3
     sigma = 2
-    # seq_len = 5
-    seq_len = 2
     batches = 1
     # identity transform, for testing purposes
     transforms = np.asarray(
-        [[0.95+0.57, 1.15-0.06]*num_tracks]*batches,
+        [0.95, 1.15, 
+        0.95+0.57, 1.15-0.06,
+        0.95+0.90, 1.15-0.87]*batches,
         dtype=np.float32
     )
     imgs = np.asarray([
         [
             np.expand_dims(cv.imread("car_dashcam0.png", cv.IMREAD_GRAYSCALE) / 255, axis=-1),
             np.expand_dims(cv.imread("car_dashcam1.png", cv.IMREAD_GRAYSCALE) / 255, axis=-1),
+            np.expand_dims(cv.imread("car_dashcam2.png", cv.IMREAD_GRAYSCALE) / 255, axis=-1),
+            np.expand_dims(cv.imread("car_dashcam3.png", cv.IMREAD_GRAYSCALE) / 255, axis=-1),
+            np.expand_dims(cv.imread("car_dashcam4.png", cv.IMREAD_GRAYSCALE) / 255, axis=-1),
         ]
     ]*batches).astype(np.float32)
 
