@@ -86,8 +86,8 @@ class MotionTracking(tf.keras.layers.Layer):
         x = ((samples[:, :, 0]) * self.win_pixel_wh) * 0.5
         y = ((samples[:, :, 1]) * self.win_pixel_wh) * 0.5
 
-        x = tf.tile(tf.expand_dims(x, axis=1), [1, 2, 1, 1])
-        y = tf.tile(tf.expand_dims(y, axis=1), [1, 2, 1, 1])
+        x = tf.reshape(tf.tile(tf.expand_dims(x, axis=1), [1, 2, 1, 1]), [-1, self.num_tracks*self.win_pixel_wh**2])
+        y = tf.reshape(tf.tile(tf.expand_dims(y, axis=1), [1, 2, 1, 1]), [-1, self.num_tracks*self.win_pixel_wh**2])
 
         x0 = tf.floor(x)
         x1 = x0 + 1
@@ -109,16 +109,15 @@ class MotionTracking(tf.keras.layers.Layer):
         y0 = tf.cast(y0, tf.int32)
         y1 = tf.cast(y1, tf.int32)
 
-        # we are sampling the image num_tracks times, so we need to tile here. unlike other
-        # operations, there is no way for gather_nd to broadcast, so we need to tile explicitly
-        tiled_imgs = tf.tile(tf.expand_dims(frames, axis=2), [1, 1, self.num_tracks, 1, 1, 1])
+        # necessary to that first dimension is equal. makes it so that we are repeatedly sampling for each image
+        tiled_imgs = tf.reshape(frames, [-1, self.h, self.w, self.c])
 
         # there are not actually 3 batch dimensions. however this works as intended: performing the
         # indexing for each batch and motion track
-        Ia = tf.gather_nd(tiled_imgs, tf.stack([y0, x0], axis=-1), batch_dims=3)
-        Ib = tf.gather_nd(tiled_imgs, tf.stack([y0, x1], axis=-1), batch_dims=3)
-        Ic = tf.gather_nd(tiled_imgs, tf.stack([y1, x0], axis=-1), batch_dims=3)
-        Id = tf.gather_nd(tiled_imgs, tf.stack([y1, x1], axis=-1), batch_dims=3)
+        Ia = tf.gather_nd(tiled_imgs, tf.stack([y0, x0], axis=-1), batch_dims=1)
+        Ib = tf.gather_nd(tiled_imgs, tf.stack([y0, x1], axis=-1), batch_dims=1)
+        Ic = tf.gather_nd(tiled_imgs, tf.stack([y1, x0], axis=-1), batch_dims=1)
+        Id = tf.gather_nd(tiled_imgs, tf.stack([y1, x1], axis=-1), batch_dims=1)
 
         # a = tf.stack([y0, x0], axis=-1)
         # print(tf.shape(y0))
@@ -223,9 +222,8 @@ class MotionTracking(tf.keras.layers.Layer):
         tot_VxVy = tf.reshape(tot_VxVy, [-1, self.num_tracks, seq_len, 2])
         tot_VxVy.set_shape([None, self.num_tracks, 5, 2])
         # tf.print(tot_VxVy)
-        # return tf.stack([first_frame, tracked], axis=1)
-        tf.print(tot_VxVy.get_shape())
-        return tot_VxVy
+        return tf.stack([first_frame, tracked], axis=1)
+        # return tot_VxVy
   
     def compute_output_shape(self, input_shape):
         seq_len = input_shape[1][1]
