@@ -2,7 +2,8 @@ import tensorflow as tf
 import cv2 as cv
 
 class SpatialTransformer(tf.keras.layers.Layer):
-    def __init__(self, **kwargs):
+    def __init__(self, seq_len=None, **kwargs):
+        self.seq_len = seq_len
         super(SpatialTransformer, self).__init__(**kwargs)
 
     def build(self, input_shape):
@@ -10,6 +11,11 @@ class SpatialTransformer(tf.keras.layers.Layer):
         self.h = input_shape[1][1]
         self.w = input_shape[1][2]
         self.c = input_shape[1][3]
+
+        if self.seq_len:
+            self.out_shape = [-1, self.seq_len, self.h, self.w, self.c]
+        else:
+            self.out_shape = [-1, self.h, self.w, self.c]
 
         # need to get the axis that has the max length so we can scale relatively to that
         self.max_hw = max(self.h, self.w)
@@ -27,7 +33,7 @@ class SpatialTransformer(tf.keras.layers.Layer):
   
     def call(self, inputs):
         local = inputs[0]
-        imgs = inputs[1]
+        imgs = tf.reshape(inputs[1], [-1, self.h, self.w, self.c])
 
         # -1 as reshape automatically infers batch dimension
         transforms = tf.reshape(local, [-1, 2, 3])
@@ -67,7 +73,7 @@ class SpatialTransformer(tf.keras.layers.Layer):
         print(tf.shape(wa))
         print(tf.shape(Ia))
 
-        out = tf.reshape(wa*Ia + wb*Ib + wc*Ic + wd*Id, [-1, self.h, self.w, self.c])
+        out = tf.reshape(wa*Ia + wb*Ib + wc*Ic + wd*Id, self.out_shape)
         return out
   
     def compute_output_shape(self, input_shape):
